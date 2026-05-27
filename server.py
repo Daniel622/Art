@@ -768,7 +768,7 @@ class Handler(BaseHTTPRequestHandler):
                 api_key_sql = ", api_key_enc=?"
                 args.append(xor_crypt(data.get("api_key")))
             if data.get("id"):
-                args = [name, base, json.dumps(models), default_model, int(data.get("priority") or 100), int(bool(data.get("is_default"))), int(bool(data.get("active", True))), int(bool(data.get("supports_reference")))] + args + [data["id"]]
+                args = [name, base, json.dumps(models), default_model, int(data.get("priority") or 100), int(bool(data.get("is_default"))), int(bool(data.get("active", True))), 1] + args + [data["id"]]
                 conn.execute(
                     f"UPDATE providers SET name=?,base_url=?,models_json=?,default_model=?,priority=?,is_default=?,active=?,supports_reference=?{api_key_sql} WHERE id=?",
                     args,
@@ -777,7 +777,7 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """INSERT INTO providers(name,base_url,api_key_enc,models_json,default_model,priority,is_default,active,supports_reference,created_at)
                        VALUES(?,?,?,?,?,?,?,?,?,?)""",
-                    (name, base, xor_crypt(data.get("api_key", "")), json.dumps(models), default_model, int(data.get("priority") or 100), int(bool(data.get("is_default"))), int(bool(data.get("active", True))), int(bool(data.get("supports_reference"))), now_iso()),
+                    (name, base, xor_crypt(data.get("api_key", "")), json.dumps(models), default_model, int(data.get("priority") or 100), int(bool(data.get("is_default"))), int(bool(data.get("active", True))), 1, now_iso()),
                 )
         return self.send_json({"ok": True})
 

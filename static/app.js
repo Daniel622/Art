@@ -156,7 +156,7 @@ function modelPickerHtml(models, defaultModel=''){
 }
 function providerForm(p={active:true,is_default:false,supports_reference:true,priority:100,models:[{id:'mock-vision-xl',name:'Vision XL Mock',enabled:true,supports_reference:true}],default_model:'mock-vision-xl'}){
   const models = normalizeModels(p.models||[]);
-  return `<form class="admin-provider-form" id="providerForm"><input type="hidden" name="id" value="${p.id||''}"><input type="hidden" name="models" value="${escapeHtml(JSON.stringify(models))}"><input type="hidden" name="default_model" value="${escapeHtml(p.default_model||'')}"><section class="panel provider-section"><h3>连接信息</h3><div class="admin-form provider-top"><div class="field"><label>Provider 名称</label><input name="name" value="${p.name||''}" required placeholder="例如 OpenAI Compatible"></div><div class="field"><label>API URL / Base URL</label><input name="base_url" value="${p.base_url||'mock://local'}" required placeholder="https://api.example.com/v1"></div><div class="field"><label>API Key</label><input name="api_key" value="${p.api_key||''}" placeholder="留空则保持原值"></div><div class="field"><label>优先级</label><input name="priority" type="number" value="${p.priority}"><div class="small helper">数字越小优先级越高。默认 Provider 会排在最前。</div></div></div></section><section class="panel provider-section"><h3>调用路由</h3><div class="provider-flags"><label><input name="active" type="checkbox" ${p.active?'checked':''}> 启用 Provider</label><label><input name="is_default" type="checkbox" ${p.is_default?'checked':''}> 默认 Provider</label><label><input name="supports_reference" type="checkbox" ${p.supports_reference?'checked':''}> Provider 支持参考图</label></div><div class="small helper">默认 Provider 会优先参与自动路由；如果某模型支持参考图，生成参考图任务时会优先选择对应能力的 Provider。</div></section><div class="provider-actions"><button class="btn light" type="button" id="fetchModels">拉取模型</button><button class="btn light" type="button" id="addModel">手动添加模型</button><button class="btn light" type="button" id="testProvider">测试</button><button class="btn primary" type="submit">保存 Provider</button></div><section class="panel provider-section"><div class="field model-field"><label>模型列表</label><div class="small helper">先勾选要启用的模型，再选择一个默认调用模型。未启用模型不能作为默认调用。</div><div class="model-picker" id="modelPicker">${modelPickerHtml(models,p.default_model||'')}</div></div></section></form>`
+  return `<form class="admin-provider-form" id="providerForm"><input type="hidden" name="id" value="${p.id||''}"><input type="hidden" name="models" value="${escapeHtml(JSON.stringify(models))}"><input type="hidden" name="default_model" value="${escapeHtml(p.default_model||'')}"><section class="panel provider-section"><h3>连接信息</h3><div class="admin-form provider-top"><div class="field"><label>Provider 名称</label><input name="name" value="${p.name||''}" required placeholder="例如 OpenAI Compatible"></div><div class="field"><label>API URL / Base URL</label><input name="base_url" value="${p.base_url||'mock://local'}" required placeholder="https://api.example.com/v1"></div><div class="field"><label>API Key</label><input name="api_key" value="${p.api_key||''}" placeholder="留空则保持原值"></div><div class="field"><label>优先级</label><input name="priority" type="number" value="${p.priority}"><div class="small helper">数字越小优先级越高。默认 Provider 会排在最前。</div></div></div></section><section class="panel provider-section"><h3>调用路由</h3><div class="provider-flags"><label><input name="active" type="checkbox" ${p.active?'checked':''}> 启用 Provider</label><label><input name="is_default" type="checkbox" ${p.is_default?'checked':''}> 默认 Provider</label></div><div class="small helper">Provider 默认支持参考图；如果某模型支持参考图，生成参考图任务时会优先选择对应能力的 Provider。</div></section><div class="provider-actions"><button class="btn light" type="button" id="fetchModels">拉取模型</button><button class="btn light" type="button" id="addModel">手动添加模型</button><button class="btn light" type="button" id="testProvider">测试</button><button class="btn primary" type="submit">保存 Provider</button></div><section class="panel provider-section"><div class="field model-field"><label>模型列表</label><div class="small helper">先勾选要启用的模型，再选择一个默认调用模型。未启用模型不能作为默认调用。</div><div class="model-picker" id="modelPicker">${modelPickerHtml(models,p.default_model||'')}</div></div></section></form>`
 }
 function codeRow(c){return `<div class="row"><b>${escapeHtml(c.code)}</b><span>${escapeHtml(c.label||'')}</span><span>${c.used_quota}/${c.total_quota}</span><span>${c.active?'启用':'停用'}</span><span class="actions"><button class="btn light" data-edit-code="${c.id}">编辑</button><button class="btn light" data-del-code="${c.id}">删除</button></span></div>`}
 function providerRow(p){return `<div class="row provider" title="归档后会停用并从列表隐藏，历史生成记录仍保留"><b>${escapeHtml(p.name)}</b><span>${escapeHtml(p.base_url)}</span><span>${p.call_count}/${p.fail_count}</span><span>${p.active?'启用':'停用'}</span><span class="actions"><button class="btn light" data-edit-provider="${p.id}">编辑</button><button class="btn light danger" data-del-provider="${p.id}">删除/归档</button></span></div>`}
@@ -222,7 +222,7 @@ function bindAdmin(codes,providers){
       f.models=JSON.parse(f.models);
       f.active=form.active.checked;
       f.is_default=form.is_default.checked;
-      f.supports_reference=form.supports_reference.checked;
+      f.supports_reference=true;
       await post('/api/admin/providers',f);
       renderAdmin();
     }catch(err){alert(err.message)}
@@ -252,7 +252,7 @@ function bindAdmin(codes,providers){
       const r=await post('/api/admin/providers/models',f);
       const existing=JSON.parse($('[name=models]',form).value||'[]');
       const currentDefault=$('[name=default_model]',form).value;
-      openModelFetchModal(r.models||[], existing, currentDefault, form.supports_reference.checked);
+      openModelFetchModal(r.models||[], existing, currentDefault, true);
     }catch(err){
       alert(err.message);
     }finally{
@@ -267,7 +267,7 @@ function bindAdmin(codes,providers){
     if(!id)return;
     const current=normalizeModels(JSON.parse($('[name=models]',form).value||'[]'));
     if(current.some(m=>m.id===id)) return alert('该模型已在列表中。');
-    const next=[...current,{id,name:id,enabled:true,supports_reference:form.supports_reference.checked}];
+    const next=[...current,{id,name:id,enabled:true,supports_reference:true}];
     const currentDefault=$('[name=default_model]',form).value;
     setModelPicker(next, currentDefault || id);
   };
