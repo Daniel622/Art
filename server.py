@@ -40,17 +40,22 @@ STYLES = {
 
 RATIO_SIZES = {
     "1:1": "1024x1024",
-    "16:9": "1024x576",
-    "9:16": "576x1024",
-    "4:3": "1024x768",
-    "3:4": "768x1024",
-    "3:2": "1024x683",
-    "2:3": "683x1024",
+    "16:9": "1536x864",
+    "9:16": "864x1536",
+    "4:3": "1344x1008",
+    "3:4": "1008x1344",
+    "3:2": "1536x1024",
+    "2:3": "1024x1536",
     "4:5": "1024x1280",
     "21:9": "1536x640",
 }
 
-QUALITY_DEFAULTS = {"draft": "standard", "standard": "standard", "high": "hd", "ultra": "hd"}
+QUALITY_DEFAULTS = {"low": "low", "medium": "standard", "high": "hd", "auto": "auto", "draft": "standard", "standard": "standard", "ultra": "hd"}
+RESOLUTION_SIZES = {
+    "1k": {"1:1": "1024x1024", "16:9": "1536x864", "9:16": "864x1536", "4:3": "1344x1008", "3:4": "1008x1344", "3:2": "1536x1024", "2:3": "1024x1536"},
+    "2k": {"1:1": "2048x2048", "16:9": "2048x1152", "9:16": "1152x2048", "4:3": "2048x1536", "3:4": "1536x2048", "3:2": "2048x1360", "2:3": "1360x2048"},
+    "4k": {"1:1": "2880x2880", "16:9": "3840x2160", "9:16": "2160x3840", "4:3": "3840x2880", "3:4": "2880x3840", "3:2": "3840x2560", "2:3": "2560x3840"},
+}
 
 
 def now_iso():
@@ -265,6 +270,11 @@ def build_prompt(prompt, style):
     return f"{prompt.strip()}\n\nCreative direction: {style_hint}" if style_hint else prompt.strip()
 
 
+def append_negative_prompt(prompt, negative_prompt):
+    negative = (negative_prompt or "").strip()
+    return f"{prompt} --no {negative}" if negative else prompt
+
+
 def build_generation_payload(params):
     prompt = (params.get("prompt") or "").strip()
     if not prompt:
@@ -272,11 +282,14 @@ def build_generation_payload(params):
     if len(prompt) > MAX_PROMPT_LEN:
         raise ValueError(f"提示词过长，请控制在 {MAX_PROMPT_LEN} 字以内。")
     ratio = params.get("ratio") or "1:1"
-    size = params.get("size") or RATIO_SIZES.get(ratio, "1024x1024")
-    quality = params.get("quality") or "standard"
+    resolution = str(params.get("resolution") or "1k").lower()
+    size = params.get("size") or RESOLUTION_SIZES.get(resolution, RESOLUTION_SIZES["1k"]).get(ratio, RATIO_SIZES.get(ratio, "1024x1024"))
+    quality = params.get("quality") or "medium"
+    negative_prompt = (params.get("negative_prompt") or "").strip()
+    enhanced_prompt = build_prompt(prompt, params.get("style") or "")
     return {
-        "prompt": build_prompt(prompt, params.get("style") or ""),
-        "negative_prompt": (params.get("negative_prompt") or "").strip(),
+        "prompt": append_negative_prompt(enhanced_prompt, negative_prompt),
+        "negative_prompt": negative_prompt,
         "model": params.get("model") or "",
         "n": 1,
         "size": size,
@@ -308,6 +321,18 @@ def provider_supports_model(provider, model, needs_reference=False):
         if m.get("enabled") and m.get("id") == model:
             return (not needs_reference) or bool(m.get("supports_reference") or provider["supports_reference"])
     return False
+
+
+def default_model(needs_reference=False):
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM providers WHERE active=1 AND archived=0 ORDER BY is_default DESC, priority ASC, id ASC"
+        ).fetchall()
+    for provider in rows:
+        for model in json.loads(provider["models_json"] or "[]"):
+            if model.get("enabled") and ((not needs_reference) or model.get("supports_reference") or provider["supports_reference"]):
+                return model.get("id") or provider["default_model"]
+    return ""
 
 
 def select_providers(model, needs_reference=False):
@@ -609,9 +634,10 @@ class Handler(BaseHTTPRequestHandler):
         if len(refs) > MAX_REFERENCE_IMAGES:
             return self.send_json({"error": f"最多上传 {MAX_REFERENCE_IMAGES} 张参考图。"}, 400)
         payload = build_generation_payload(data)
-        model = payload["model"]
+        model = payload["model"] or default_model(bool(refs))
         if not model:
-            return self.send_json({"error": "请选择可用模型。"}, 400)
+            return self.send_json({"error": "后台还没有配置可用模型，请联系管理员。"}, 400)
+        payload["model"] = model
         providers = select_providers(model, bool(refs))
         if not providers:
             return self.send_json({"error": "当前模型没有匹配的可用 Provider，或该模型不支持参考图。"}, 400)

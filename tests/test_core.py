@@ -15,6 +15,7 @@ class CoreTests(unittest.TestCase):
     def test_generation_payload_defaults_and_negative_prompt(self):
         payload = server.build_generation_payload({"prompt": "a ceramic lamp", "negative_prompt": "blur", "style": "product", "ratio": "4:5"})
         self.assertIn("product hero image", payload["prompt"])
+        self.assertIn("--no blur", payload["prompt"])
         self.assertEqual(payload["negative_prompt"], "blur")
         self.assertEqual(payload["quality"], "standard")
         self.assertEqual(payload["size"], "1024x1280")
@@ -34,6 +35,7 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(server.provider_supports_model(rows[0], "mock-vision-xl", True))
         self.assertEqual(server.select_providers("mock-vision-xl", True)[0]["name"], "Local Mock Provider")
         self.assertEqual(server.select_providers("missing-model"), [])
+        self.assertEqual(server.default_model(True), "mock-vision-xl")
 
     def test_access_quota_validation(self):
         with server.db() as conn:
