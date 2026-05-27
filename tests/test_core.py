@@ -25,9 +25,21 @@ class CoreTests(unittest.TestCase):
             server.build_generation_payload({"prompt": "   "})
 
     def test_provider_model_parser(self):
-        models = server.parse_models_response({"data": [{"id": "a"}, "b"]})
+        models = server.parse_models_response({"data": [{"id": "a"}, "b", {"id": "a", "name": "dup"}]})
         self.assertEqual([m["id"] for m in models], ["a", "b"])
         self.assertFalse(models[0]["enabled"])
+
+    def test_normalize_provider_models_filters_empty_and_dedupes(self):
+        models = server.normalize_provider_models([
+            {"id": "gpt-image-1", "name": "GPT Image", "enabled": True, "supports_reference": True},
+            {"id": "gpt-image-1", "name": "Duplicate", "enabled": False},
+            {"name": "named-only", "enabled": True},
+            {"id": "   "},
+            "raw-model",
+        ])
+        self.assertEqual([m["id"] for m in models], ["gpt-image-1", "named-only", "raw-model"])
+        self.assertTrue(models[0]["enabled"])
+        self.assertTrue(models[0]["supports_reference"])
 
     def test_provider_selection_and_reference_capability(self):
         with server.db() as conn:
@@ -47,6 +59,18 @@ class CoreTests(unittest.TestCase):
         row, err = server.validate_access(code_id)
         self.assertIsNone(row)
         self.assertIn("额度", err)
+
+    def test_default_model_falls_back_to_first_enabled(self):
+        models = server.normalize_provider_models([
+            {"id": "first", "enabled": True},
+            {"id": "second", "enabled": True},
+            {"id": "disabled", "enabled": False},
+        ])
+        enabled = [m for m in models if m["enabled"]]
+        enabled_ids = {m["id"] for m in enabled}
+        submitted_default = "disabled"
+        default_model = submitted_default if submitted_default in enabled_ids else enabled[0]["id"]
+        self.assertEqual(default_model, "first")
 
 
 if __name__ == "__main__":

@@ -5,8 +5,9 @@ data/
 __pycache__/
 .DS_Store
 .env
+.env.*
 venv/
 .venv/
 .claude/settings.local.json
-.claude/sync-after-round.log
+.claude/*.log
 .claude/*.lock

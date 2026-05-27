@@ -303,16 +303,30 @@ def parse_models_response(data):
         items = data.get("data") or data.get("models") or data.get("result") or []
     else:
         items = data
-    models = []
-    if isinstance(items, list):
-        for item in items:
-            if isinstance(item, str):
-                models.append({"id": item, "name": item, "enabled": False, "supports_reference": False})
-            elif isinstance(item, dict):
-                mid = item.get("id") or item.get("name") or item.get("model")
-                if mid:
-                    models.append({"id": mid, "name": item.get("name") or mid, "enabled": False, "supports_reference": bool(item.get("supports_reference", item.get("multimodal", False)))})
-    return models
+    return normalize_provider_models(items)
+
+
+def normalize_provider_models(models):
+    normalized = []
+    seen = set()
+    for item in models or []:
+        if isinstance(item, str):
+            mid = item.strip()
+            name = mid
+            enabled = False
+            supports_reference = False
+        elif isinstance(item, dict):
+            mid = str(item.get("id") or item.get("name") or item.get("model") or "").strip()
+            name = str(item.get("name") or mid).strip()
+            enabled = bool(item.get("enabled"))
+            supports_reference = bool(item.get("supports_reference", item.get("multimodal", False)))
+        else:
+            continue
+        if not mid or mid in seen:
+            continue
+        seen.add(mid)
+        normalized.append({"id": mid, "name": name or mid, "enabled": enabled, "supports_reference": supports_reference})
+    return normalized
 
 
 def provider_supports_model(provider, model, needs_reference=False):
@@ -737,12 +751,14 @@ class Handler(BaseHTTPRequestHandler):
     def save_provider(self, data):
         name = (data.get("name") or "").strip()
         base = (data.get("base_url") or "").strip()
-        models = data.get("models") or []
+        models = normalize_provider_models(data.get("models") or [])
         if not name or not base:
             return self.send_json({"error": "Provider 名称和 Base URL 不能为空。"}, 400)
-        if not any(m.get("enabled") for m in models):
+        enabled_models = [m for m in models if m.get("enabled")]
+        if not enabled_models:
             return self.send_json({"error": "请至少启用一个模型。"}, 400)
-        default_model = data.get("default_model") or next((m["id"] for m in models if m.get("enabled")), "")
+        enabled_ids = {m["id"] for m in enabled_models}
+        default_model = data.get("default_model") if data.get("default_model") in enabled_ids else enabled_models[0]["id"]
         with db() as conn:
             if data.get("is_default"):
                 conn.execute("UPDATE providers SET is_default=0")

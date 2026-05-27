@@ -87,36 +87,189 @@ async function renderAdmin(){
 }
 function renderAdminLogin(msg=''){app.innerHTML=`<section class="hero page"><div class="hero-copy"><div class="brand">Obscura Studio Admin</div><div><h1>管理访问、模型与生成记录</h1><p>默认管理员：admin / ChangeMe123!。首次部署后请立刻修改环境变量或数据库中的密码。</p><form class="login-strip"><input name="username" placeholder="管理员账号"><input name="password" type="password" placeholder="密码"><button class="btn primary">登录</button><a class="btn ghost" href="/">返回首页</a></form><div class="msg">${msg}</div></div></div><div class="hero-art"><div class="shot one"></div><div class="shot three"></div></div></section>`; $('form').onsubmit=async e=>{e.preventDefault();try{await post('/api/admin/login',{username:e.target.username.value,password:e.target.password.value}); renderAdmin();}catch(err){renderAdminLogin(err.message)}}}
 function codeForm(c={active:true,total_quota:20,used_quota:0}){return `<form class="admin-form" id="codeForm"><input type="hidden" name="id" value="${c.id||''}"><div class="field"><label>凭证</label><input name="code" value="${c.code||''}" required></div><div class="field"><label>标签</label><input name="label" value="${c.label||''}"></div><div class="field"><label>总额度</label><input name="total_quota" type="number" value="${c.total_quota}"></div><div class="field"><label>已用</label><input name="used_quota" type="number" value="${c.used_quota}"></div><div class="field"><label>备注</label><input name="note" value="${c.note||''}"></div><label><input name="active" type="checkbox" ${c.active?'checked':''}> 启用</label><button class="btn primary">保存凭证</button></form>`}
-function normalizeModels(models){return (models||[]).map(m=>typeof m==='string'?{id:m,name:m,enabled:false,supports_reference:false}:{id:m.id||m.name||'',name:m.name||m.id||'',enabled:!!m.enabled,supports_reference:!!m.supports_reference}).filter(m=>m.id)}
+function normalizeModels(models){return (models||[]).map(m=>typeof m==='string'?{id:m,name:m,enabled:false,supports_reference:false}:{id:(m.id||m.name||'').trim(),name:(m.name||m.id||'').trim(),enabled:!!m.enabled,supports_reference:!!m.supports_reference}).filter(m=>m.id).filter((m,i,arr)=>arr.findIndex(x=>x.id===m.id)===i)}
+function modelToolbarHtml(models){const list=normalizeModels(models);const enabled=list.filter(m=>m.enabled).length;const refs=list.filter(m=>m.supports_reference).length;return `<div class="model-toolbar"><span class="pill">共 ${list.length} 个模型</span><span class="pill">启用 ${enabled}</span><span class="pill">参考图 ${refs}</span></div>`}
+function modelFetchState(models, existingModels, defaultModel, providerSupportsReference){
+  const saved = new Map(normalizeModels(existingModels).map(model=>[model.id, model]));
+  const merged = normalizeModels(models).map(model=>{
+    const current = saved.get(model.id);
+    return current ? {...model, enabled:current.enabled, supports_reference:current.supports_reference, name:current.name||model.name} : {...model, enabled:false, supports_reference:providerSupportsReference && model.supports_reference};
+  });
+  return {models:merged, defaultModel:merged.some(model=>model.id===defaultModel && model.enabled)?defaultModel:(merged.find(model=>model.enabled)?.id||'')};
+}
+function modelFetchModalHtml(state){
+  const list = state.models;
+  return `<div class="modal model-fetch-modal open" id="modelFetchModal"><div class="modal-card"><div class="modal-head"><div><h3>拉取模型</h3><p class="small">勾选需要启用的模型，再决定哪些模型支持参考图。</p></div><button class="btn light" type="button" id="closeModelFetchModal">关闭</button></div><div class="modal-body">${!list.length?'<div class="model-empty">没有拉取到任何模型。</div>':`<div class="modal-actions inline"><button class="btn light" type="button" id="selectAllFetchedModels">全选</button><button class="btn light" type="button" id="clearFetchedModels">清空</button></div><div class="fetched-model-list">${list.map(model=>`<div class="fetched-model-item" data-fetched-model-row data-model-id="${escapeHtml(model.id)}"><div class="model-main"><div class="model-title"><b>${escapeHtml(model.name)}</b><span>${escapeHtml(model.id)}</span></div><div class="model-badges">${model.enabled?'<span class="badge ok">已选择</span>':''}${state.defaultModel===model.id?'<span class="badge accent">当前默认</span>':''}${model.supports_reference?'<span class="badge warm">支持参考图</span>':''}</div></div><div class="model-controls"><label class="model-toggle"><input type="checkbox" data-fetched-enabled ${model.enabled?'checked':''}> 启用</label><label class="model-toggle"><input type="radio" name="fetched_default_model" value="${escapeHtml(model.id)}" ${state.defaultModel===model.id?'checked':''} ${model.enabled?'':'disabled'}> 默认调用</label><label class="model-toggle"><input type="checkbox" data-fetched-ref ${model.supports_reference?'checked':''}> 参考图</label></div></div>`).join('')}</div>`}</div><div class="modal-actions"><button class="btn light" type="button" id="cancelModelFetchModal">取消</button><button class="btn primary" type="button" id="applyFetchedModels">应用选择</button></div></div></div>`;
+}
+function openModelFetchModal(models, existingModels, defaultModel, providerSupportsReference){
+  const form = $('#providerForm');
+  if(!form) return;
+  const existing = $('#modelFetchModal');
+  if(existing) existing.remove();
+  const state = modelFetchState(models, existingModels, defaultModel, providerSupportsReference);
+  form.insertAdjacentHTML('beforeend', modelFetchModalHtml(state));
+  bindModelFetchModal();
+}
+function bindModelFetchModal(){
+  const modal = $('#modelFetchModal');
+  if(!modal) return;
+  const close = ()=>modal.remove();
+  const sync = ()=>{
+    const rows = $$('[data-fetched-model-row]', modal);
+    rows.forEach(row=>{
+      const enabled = $('[data-fetched-enabled]', row).checked;
+      const radio = $('[name="fetched_default_model"]', row);
+      radio.disabled = !enabled;
+      if(!enabled) radio.checked = false;
+    });
+    const chosen = $('[name="fetched_default_model"]:checked', modal);
+    if(!chosen){
+      const fallbackRow = rows.find(row=> $('[data-fetched-enabled]', row).checked);
+      const fallbackRadio = fallbackRow && $('[name="fetched_default_model"]', fallbackRow);
+      if(fallbackRadio) fallbackRadio.checked = true;
+    }
+  };
+  $('#closeModelFetchModal').onclick = close;
+  $('#cancelModelFetchModal').onclick = close;
+  $('#selectAllFetchedModels').onclick = ()=>{$$('[data-fetched-enabled]', modal).forEach(input=>input.checked=true); sync();};
+  $('#clearFetchedModels').onclick = ()=>{$$('[data-fetched-enabled]', modal).forEach(input=>input.checked=false); sync();};
+  $$('[data-fetched-enabled]', modal).forEach(input=>input.onchange=sync);
+  $$('[name="fetched_default_model"]', modal).forEach(input=>input.onchange=e=>{const row=e.target.closest('[data-fetched-model-row]'); if(row){const enabled=$('[data-fetched-enabled]', row); if(enabled && !enabled.checked) enabled.checked=true;} sync();});
+  $('#applyFetchedModels').onclick = ()=>{
+    const rows = $$('[data-fetched-model-row]', modal);
+    const selected = rows.map(row=>({id:row.dataset.modelId,name:$('.model-title b', row).textContent,enabled:$('[data-fetched-enabled]', row).checked,supports_reference:$('[data-fetched-ref]', row).checked}));
+    const current = normalizeModels(JSON.parse($('[name=models]', $('#providerForm')).value||'[]'));
+    const keepExisting = current.filter(model=>!selected.some(next=>next.id===model.id));
+    const merged = normalizeModels([...selected, ...keepExisting]);
+    const chosen = $('[name="fetched_default_model"]:checked', modal);
+    const defaultModel = chosen?.value && merged.some(model=>model.id===chosen.value && model.enabled) ? chosen.value : (merged.find(model=>model.enabled)?.id || '');
+    setModelPicker(merged, defaultModel);
+    close();
+  };
+  modal.onclick = e=>{if(e.target===modal) close();};
+  sync();
+}
 function modelPickerHtml(models, defaultModel=''){
   const list = normalizeModels(models);
   if(!list.length) return '<div class="model-empty">还没有模型。输入 Base URL 和 API Key 后点击“拉取模型”，或手动添加模型 ID。</div>';
-  return list.map((m,i)=>`<div class="model-item" data-model-row data-model-id="${escapeHtml(m.id)}" data-model-name="${escapeHtml(m.name)}"><label><input type="checkbox" data-model-enabled ${m.enabled?'checked':''}> 启用 <b>${escapeHtml(m.name)}</b><span>${escapeHtml(m.id)}</span></label><label><input type="radio" name="default_model_choice" value="${escapeHtml(m.id)}" ${defaultModel===m.id?'checked':''}> 默认</label><label><input type="checkbox" data-model-ref ${m.supports_reference?'checked':''}> 参考图</label></div>`).join('');
+  return `${modelToolbarHtml(list)}<div class="model-list">${list.map(m=>`<div class="model-item ${m.enabled?'is-enabled':'is-disabled'}" data-model-row data-model-id="${escapeHtml(m.id)}" data-model-name="${escapeHtml(m.name)}"><div class="model-main"><div class="model-title"><b>${escapeHtml(m.name)}</b><span>${escapeHtml(m.id)}</span></div><div class="model-badges">${m.enabled?'<span class="badge ok">已启用</span>':'<span class="badge muted">未启用</span>'}${defaultModel===m.id?'<span class="badge accent">默认调用</span>':''}${m.supports_reference?'<span class="badge warm">支持参考图</span>':''}</div></div><div class="model-controls"><label class="model-toggle"><input type="checkbox" data-model-enabled ${m.enabled?'checked':''}> 启用</label><label class="model-toggle"><input type="radio" name="default_model_choice" value="${escapeHtml(m.id)}" ${defaultModel===m.id?'checked':''} ${m.enabled?'':'disabled'}> 默认调用</label><label class="model-toggle"><input type="checkbox" data-model-ref ${m.supports_reference?'checked':''}> 参考图</label></div></div>`).join('')}</div>`;
 }
 function providerForm(p={active:true,is_default:false,supports_reference:true,priority:100,models:[{id:'mock-vision-xl',name:'Vision XL Mock',enabled:true,supports_reference:true}],default_model:'mock-vision-xl'}){
   const models = normalizeModels(p.models||[]);
-  return `<form class="admin-provider-form" id="providerForm"><input type="hidden" name="id" value="${p.id||''}"><input type="hidden" name="models" value="${escapeHtml(JSON.stringify(models))}"><input type="hidden" name="default_model" value="${escapeHtml(p.default_model||'')}"><div class="admin-form provider-top"><div class="field"><label>Provider 名称</label><input name="name" value="${p.name||''}" required placeholder="例如 OpenAI Compatible"></div><div class="field"><label>API URL / Base URL</label><input name="base_url" value="${p.base_url||'mock://local'}" required placeholder="https://api.example.com/v1"></div><div class="field"><label>API Key</label><input name="api_key" value="${p.api_key||''}" placeholder="留空则保持原值"></div><div class="field"><label>优先级</label><input name="priority" type="number" value="${p.priority}"></div><label><input name="active" type="checkbox" ${p.active?'checked':''}> 启用 Provider</label><label><input name="is_default" type="checkbox" ${p.is_default?'checked':''}> 默认 Provider</label><label><input name="supports_reference" type="checkbox" ${p.supports_reference?'checked':''}> Provider 支持参考图</label></div><div class="provider-actions"><button class="btn light" type="button" id="fetchModels">拉取模型</button><button class="btn light" type="button" id="addModel">手动添加模型</button><button class="btn light" type="button" id="testProvider">测试</button><button class="btn primary" type="submit">保存 Provider</button></div><div class="field model-field"><label>模型列表</label><div class="model-picker" id="modelPicker">${modelPickerHtml(models,p.default_model||'')}</div><div class="small">拉取到的模型默认不启用。请勾选需要前台可用的模型，并选择一个默认模型。</div></div></form>`
+  return `<form class="admin-provider-form" id="providerForm"><input type="hidden" name="id" value="${p.id||''}"><input type="hidden" name="models" value="${escapeHtml(JSON.stringify(models))}"><input type="hidden" name="default_model" value="${escapeHtml(p.default_model||'')}"><section class="panel provider-section"><h3>连接信息</h3><div class="admin-form provider-top"><div class="field"><label>Provider 名称</label><input name="name" value="${p.name||''}" required placeholder="例如 OpenAI Compatible"></div><div class="field"><label>API URL / Base URL</label><input name="base_url" value="${p.base_url||'mock://local'}" required placeholder="https://api.example.com/v1"></div><div class="field"><label>API Key</label><input name="api_key" value="${p.api_key||''}" placeholder="留空则保持原值"></div><div class="field"><label>优先级</label><input name="priority" type="number" value="${p.priority}"><div class="small helper">数字越小优先级越高。默认 Provider 会排在最前。</div></div></div></section><section class="panel provider-section"><h3>调用路由</h3><div class="provider-flags"><label><input name="active" type="checkbox" ${p.active?'checked':''}> 启用 Provider</label><label><input name="is_default" type="checkbox" ${p.is_default?'checked':''}> 默认 Provider</label><label><input name="supports_reference" type="checkbox" ${p.supports_reference?'checked':''}> Provider 支持参考图</label></div><div class="small helper">默认 Provider 会优先参与自动路由；如果某模型支持参考图，生成参考图任务时会优先选择对应能力的 Provider。</div></section><div class="provider-actions"><button class="btn light" type="button" id="fetchModels">拉取模型</button><button class="btn light" type="button" id="addModel">手动添加模型</button><button class="btn light" type="button" id="testProvider">测试</button><button class="btn primary" type="submit">保存 Provider</button></div><section class="panel provider-section"><div class="field model-field"><label>模型列表</label><div class="small helper">先勾选要启用的模型，再选择一个默认调用模型。未启用模型不能作为默认调用。</div><div class="model-picker" id="modelPicker">${modelPickerHtml(models,p.default_model||'')}</div></div></section></form>`
 }
 function codeRow(c){return `<div class="row"><b>${escapeHtml(c.code)}</b><span>${escapeHtml(c.label||'')}</span><span>${c.used_quota}/${c.total_quota}</span><span>${c.active?'启用':'停用'}</span><span class="actions"><button class="btn light" data-edit-code="${c.id}">编辑</button><button class="btn light" data-del-code="${c.id}">删除</button></span></div>`}
-function providerRow(p){return `<div class="row provider"><b>${escapeHtml(p.name)}</b><span>${escapeHtml(p.base_url)}</span><span>${p.call_count}/${p.fail_count}</span><span>${p.active?'启用':'停用'}</span><span class="actions"><button class="btn light" data-edit-provider="${p.id}">编辑</button><button class="btn light" data-del-provider="${p.id}">归档</button></span></div>`}
+function providerRow(p){return `<div class="row provider" title="归档后会停用并从列表隐藏，历史生成记录仍保留"><b>${escapeHtml(p.name)}</b><span>${escapeHtml(p.base_url)}</span><span>${p.call_count}/${p.fail_count}</span><span>${p.active?'启用':'停用'}</span><span class="actions"><button class="btn light" data-edit-provider="${p.id}">编辑</button><button class="btn light danger" data-del-provider="${p.id}">删除/归档</button></span></div>`}
 function genRow(g){return `<div class="row gen"><span>${escapeHtml(g.access_code||'')}</span><span>${escapeHtml(g.model||'')}</span><span>${escapeHtml(g.provider_name||'')}</span><b class="${g.status==='failed'?'error':'ok'}">${g.status}</b><span>${escapeHtml(g.original_prompt||'').slice(0,90)}</span><span>${g.image_url?`<a href="${g.image_url}" target="_blank"><img class="preview-thumb" src="${g.image_url}"></a>`:''}</span></div>`}
 function bindModelPicker(){
   const form = $('#providerForm');
   if(!form) return;
-  const sync = ()=>{
+  const sync = (rerender=true)=>{
     const rows = $$('[data-model-row]', form);
     const models = rows.map(row=>({id:row.dataset.modelId,name:row.dataset.modelName,enabled:$('[data-model-enabled]',row).checked,supports_reference:$('[data-model-ref]',row).checked}));
-    $('[name=models]', form).value = JSON.stringify(models);
+    const radios = $$('[name=default_model_choice]', form);
+    radios.forEach(radio=>{
+      const row = radio.closest('[data-model-row]');
+      const enabled = !!row && $('[data-model-enabled]', row).checked;
+      radio.disabled = !enabled;
+      if(!enabled) radio.checked = false;
+    });
     const chosen = $('[name=default_model_choice]:checked', form);
     const firstEnabled = models.find(m=>m.enabled);
-    $('[name=default_model]', form).value = chosen?.value || firstEnabled?.id || '';
+    const defaultModel = chosen?.value || firstEnabled?.id || '';
+    if(defaultModel && !chosen){
+      const fallback = $(`[name="default_model_choice"][value="${CSS.escape(defaultModel)}"]`, form);
+      if(fallback) fallback.checked = true;
+    }
+    $('[name=models]', form).value = JSON.stringify(models);
+    $('[name=default_model]', form).value = defaultModel;
+    if(rerender){
+      $('#modelPicker').innerHTML = modelPickerHtml(models, defaultModel);
+      bindModelPicker();
+    }
   };
-  $$('#modelPicker input', form).forEach(input=>input.onchange=sync);
-  sync();
+  $$('#modelPicker [data-model-enabled]', form).forEach(input=>input.onchange=()=>sync());
+  $$('#modelPicker [data-model-ref]', form).forEach(input=>input.onchange=()=>sync());
+  $$('#modelPicker [name="default_model_choice"]', form).forEach(input=>input.onchange=e=>{const row=e.target.closest('[data-model-row]'); if(row){const enabled=$('[data-model-enabled]',row); if(enabled && !enabled.checked) enabled.checked=true;} sync();});
+  sync(false);
+}
+function mergeFetchedModels(existing,incoming){
+  const current = new Map(normalizeModels(existing).map(model=>[model.id, model]));
+  const next = normalizeModels(incoming).map(model=>{
+    const saved = current.get(model.id);
+    return saved ? {...model, enabled:saved.enabled, supports_reference:saved.supports_reference, name:saved.name||model.name} : model;
+  });
+  return next.concat(normalizeModels(existing).filter(model=>!next.some(candidate=>candidate.id===model.id)));
 }
 function setModelPicker(models, defaultModel=''){
   $('#modelPicker').innerHTML = modelPickerHtml(models, defaultModel);
+  const form = $('#providerForm');
+  if(form){
+    $('[name=models]', form).value = JSON.stringify(normalizeModels(models));
+    $('[name=default_model]', form).value = defaultModel;
+  }
   bindModelPicker();
 }
-function bindAdmin(codes,providers){$('#adminLogout').onclick=async()=>{await post('/api/admin/logout'); renderAdminLogin();}; $('#codeForm').onsubmit=async e=>{e.preventDefault();const f=Object.fromEntries(new FormData(e.target));f.active=e.target.active.checked;try{await post('/api/admin/codes',f);renderAdmin()}catch(err){alert(err.message)}}; bindModelPicker(); $('#providerForm').onsubmit=async e=>{e.preventDefault();bindModelPicker();const f=Object.fromEntries(new FormData(e.target));try{f.models=JSON.parse(f.models);f.active=e.target.active.checked;f.is_default=e.target.is_default.checked;f.supports_reference=e.target.supports_reference.checked;await post('/api/admin/providers',f);renderAdmin()}catch(err){alert(err.message)}}; $$('[data-edit-code]').forEach(b=>b.onclick=()=>{$('#codeForm').outerHTML=codeForm(codes.find(x=>x.id==b.dataset.editCode)); bindAdmin(codes,providers)}); $$('[data-del-code]').forEach(b=>b.onclick=async()=>{if(confirm('删除该凭证？')){await del('/api/admin/codes/'+b.dataset.delCode);renderAdmin()}}); $$('[data-edit-provider]').forEach(b=>b.onclick=()=>{$('#providerForm').outerHTML=providerForm(providers.find(x=>x.id==b.dataset.editProvider)); bindAdmin(codes,providers)}); $$('[data-del-provider]').forEach(b=>b.onclick=async()=>{if(confirm('归档该 Provider？')){await del('/api/admin/providers/'+b.dataset.delProvider);renderAdmin()}}); $('#testProvider').onclick=async()=>{const f=Object.fromEntries(new FormData($('#providerForm'))); const r=await post('/api/admin/providers/test',f).catch(e=>({message:e.message})); alert(r.message||'完成')}; $('#fetchModels').onclick=async()=>{const f=Object.fromEntries(new FormData($('#providerForm'))); const r=await post('/api/admin/providers/models',f); setModelPicker(r.models, '')}; $('#addModel').onclick=()=>{const form=$('#providerForm'); const id=prompt('输入模型 ID，例如 gpt-image-1'); if(!id)return; const current=JSON.parse($('[name=models]',form).value||'[]'); if(current.some(m=>m.id===id.trim())) return alert('该模型已在列表中。'); current.push({id:id.trim(),name:id.trim(),enabled:true,supports_reference:form.supports_reference.checked}); setModelPicker(current, $('[name=default_model]',form).value || id.trim())}}
+function bindAdmin(codes,providers){
+  $('#adminLogout').onclick=async()=>{await post('/api/admin/logout'); renderAdminLogin();};
+  $('#codeForm').onsubmit=async e=>{e.preventDefault();const f=Object.fromEntries(new FormData(e.target));f.active=e.target.active.checked;try{await post('/api/admin/codes',f);renderAdmin()}catch(err){alert(err.message)}};
+  bindModelPicker();
+  $('#providerForm').onsubmit=async e=>{
+    e.preventDefault();
+    const form=e.target;
+    const f=Object.fromEntries(new FormData(form));
+    try{
+      f.models=JSON.parse(f.models);
+      f.active=form.active.checked;
+      f.is_default=form.is_default.checked;
+      f.supports_reference=form.supports_reference.checked;
+      await post('/api/admin/providers',f);
+      renderAdmin();
+    }catch(err){alert(err.message)}
+  };
+  $$('[data-edit-code]').forEach(b=>b.onclick=()=>{$('#codeForm').outerHTML=codeForm(codes.find(x=>x.id==b.dataset.editCode)); bindAdmin(codes,providers)});
+  $$('[data-del-code]').forEach(b=>b.onclick=async()=>{if(confirm('删除该凭证？')){await del('/api/admin/codes/'+b.dataset.delCode);renderAdmin()}});
+  $$('[data-edit-provider]').forEach(b=>b.onclick=()=>{$('#providerForm').outerHTML=providerForm(providers.find(x=>x.id==b.dataset.editProvider)); bindAdmin(codes,providers)});
+  $$('[data-del-provider]').forEach(b=>b.onclick=async()=>{
+    if(confirm('归档该 Provider？归档后会停用并从列表隐藏，历史记录仍保留。')){
+      await del('/api/admin/providers/'+b.dataset.delProvider);
+      renderAdmin();
+    }
+  });
+  $('#testProvider').onclick=async()=>{
+    const f=Object.fromEntries(new FormData($('#providerForm')));
+    const r=await post('/api/admin/providers/test',f).catch(e=>({message:e.message}));
+    alert(r.message||'完成');
+  };
+  $('#fetchModels').onclick=async()=>{
+    const form=$('#providerForm');
+    const button=$('#fetchModels');
+    const f=Object.fromEntries(new FormData(form));
+    const originalText=button.textContent;
+    button.disabled=true;
+    button.textContent='拉取中...';
+    try{
+      const r=await post('/api/admin/providers/models',f);
+      const existing=JSON.parse($('[name=models]',form).value||'[]');
+      const currentDefault=$('[name=default_model]',form).value;
+      openModelFetchModal(r.models||[], existing, currentDefault, form.supports_reference.checked);
+    }catch(err){
+      alert(err.message);
+    }finally{
+      button.disabled=false;
+      button.textContent=originalText;
+    }
+  };
+  $('#addModel').onclick=()=>{
+    const form=$('#providerForm');
+    const raw=prompt('输入模型 ID，例如 gpt-image-1');
+    const id=(raw||'').trim();
+    if(!id)return;
+    const current=normalizeModels(JSON.parse($('[name=models]',form).value||'[]'));
+    if(current.some(m=>m.id===id)) return alert('该模型已在列表中。');
+    const next=[...current,{id,name:id,enabled:true,supports_reference:form.supports_reference.checked}];
+    const currentDefault=$('[name=default_model]',form).value;
+    setModelPicker(next, currentDefault || id);
+  };
+}
 route();
