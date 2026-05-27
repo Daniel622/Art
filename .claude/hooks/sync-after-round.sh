@@ -71,7 +71,7 @@ collect_changes() {
   done
 }
 
-mapfile -t changed_paths < <(collect_changes)
+changed_paths=("${(@f)$(collect_changes)}")
 if (( ${#changed_paths[@]} == 0 )); then
   printf 'no working tree changes, skip\n'
   exit 0
