@@ -133,6 +133,17 @@ def public_provider(row, reveal_key=False):
     return d
 
 
+def resolve_provider_api_key(data):
+    raw = data.get("api_key") or ""
+    if raw and not str(raw).startswith("••••"):
+        return str(raw)
+    if not data.get("id"):
+        return ""
+    with db() as conn:
+        row = conn.execute("SELECT api_key_enc FROM providers WHERE id=?", (data["id"],)).fetchone()
+    return xor_decrypt(row["api_key_enc"]) if row else ""
+
+
 def init_db():
     ensure_dirs()
     with db() as conn:
@@ -783,10 +794,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def test_provider(self, data):
         base = (data.get("base_url") or "").strip()
+        api_key = resolve_provider_api_key(data)
         if base.startswith("mock://"):
             return self.send_json({"ok": True, "message": "Mock Provider 可用。"})
         try:
-            req = urllib.request.Request(base.rstrip("/") + "/models", headers={"Authorization": f"Bearer {data.get('api_key','')}"})
+            req = urllib.request.Request(base.rstrip("/") + "/models", headers={"Authorization": f"Bearer {api_key}"} if api_key else {})
             with urllib.request.urlopen(req, timeout=15) as resp:
                 return self.send_json({"ok": True, "message": f"连接成功，状态 {resp.status}。"})
         except Exception as e:
@@ -794,10 +806,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def fetch_models(self, data):
         base = (data.get("base_url") or "").strip()
+        api_key = resolve_provider_api_key(data)
         if base.startswith("mock://"):
             return self.send_json({"models": [{"id": "mock-vision-xl", "name": "Vision XL Mock", "enabled": False, "supports_reference": True}]})
         try:
-            req = urllib.request.Request(base.rstrip("/") + "/models", headers={"Authorization": f"Bearer {data.get('api_key','')}"})
+            req = urllib.request.Request(base.rstrip("/") + "/models", headers={"Authorization": f"Bearer {api_key}"} if api_key else {})
             with urllib.request.urlopen(req, timeout=20) as resp:
                 models = parse_models_response(json.loads(resp.read().decode()))
             return self.send_json({"models": models})
