@@ -23,7 +23,7 @@ DATA_DIR = Path(os.environ.get("ART_DATA_DIR", ROOT / "data")).resolve()
 IMAGE_DIR = Path(os.environ.get("ART_IMAGE_DIR", DATA_DIR / "images")).resolve()
 DB_PATH = Path(os.environ.get("ART_DB_PATH", DATA_DIR / "art.db")).resolve()
 SESSION_TTL = int(os.environ.get("ART_SESSION_TTL_SECONDS", "604800"))
-MAX_REFERENCE_IMAGES = int(os.environ.get("ART_MAX_REFERENCE_IMAGES", "4"))
+MAX_REFERENCE_IMAGES = int(os.environ.get("ART_MAX_REFERENCE_IMAGES", "9"))
 MAX_PROMPT_LEN = int(os.environ.get("ART_MAX_PROMPT_LENGTH", "1600"))
 
 
