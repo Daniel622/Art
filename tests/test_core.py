@@ -11,6 +11,24 @@ import server
 class CoreTests(unittest.TestCase):
     def setUp(self):
         server.init_db()
+        with server.db() as conn:
+            conn.execute("DELETE FROM providers")
+            conn.execute(
+                """INSERT INTO providers(name,base_url,api_key_enc,models_json,default_model,priority,is_default,active,supports_reference,created_at)
+                   VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    "Test Provider",
+                    "mock://local",
+                    server.xor_crypt(""),
+                    '[{"id": "mock-vision-xl", "name": "Vision XL Mock", "enabled": true, "supports_reference": true}]',
+                    "mock-vision-xl",
+                    1,
+                    1,
+                    1,
+                    1,
+                    server.now_iso(),
+                ),
+            )
 
     def test_generation_payload_defaults_and_negative_prompt(self):
         payload = server.build_generation_payload({"prompt": "a ceramic lamp", "negative_prompt": "blur", "style": "product", "ratio": "4:5"})
@@ -45,7 +63,7 @@ class CoreTests(unittest.TestCase):
         with server.db() as conn:
             rows = conn.execute("SELECT * FROM providers").fetchall()
         self.assertTrue(server.provider_supports_model(rows[0], "mock-vision-xl", True))
-        self.assertEqual(server.select_providers("mock-vision-xl", True)[0]["name"], "Local Mock Provider")
+        self.assertEqual(server.select_providers("mock-vision-xl", True)[0]["name"], "Test Provider")
         self.assertEqual(server.select_providers("missing-model"), [])
         self.assertEqual(server.default_model(True), "mock-vision-xl")
 
@@ -60,17 +78,13 @@ class CoreTests(unittest.TestCase):
         self.assertIsNone(row)
         self.assertIn("额度", err)
 
-    def test_default_model_falls_back_to_first_enabled(self):
-        models = server.normalize_provider_models([
-            {"id": "first", "enabled": True},
-            {"id": "second", "enabled": True},
-            {"id": "disabled", "enabled": False},
-        ])
-        enabled = [m for m in models if m["enabled"]]
-        enabled_ids = {m["id"] for m in enabled}
-        submitted_default = "disabled"
-        default_model = submitted_default if submitted_default in enabled_ids else enabled[0]["id"]
-        self.assertEqual(default_model, "first")
+    def test_init_db_does_not_create_default_provider(self):
+        with server.db() as conn:
+            conn.execute("DELETE FROM providers")
+        server.init_db()
+        with server.db() as conn:
+            count = conn.execute("SELECT COUNT(*) FROM providers").fetchone()[0]
+        self.assertEqual(count, 0)
 
 
 if __name__ == "__main__":

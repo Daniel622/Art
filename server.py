@@ -228,15 +228,6 @@ def init_db():
                 "INSERT INTO access_codes(code,label,note,total_quota,created_at) VALUES(?,?,?,?,?)",
                 (os.environ.get("ART_DEFAULT_ACCESS_CODE", "PRIVATE-STUDIO"), "Default Studio Pass", "Created on first boot", 50, now_iso()),
             )
-        if conn.execute("SELECT COUNT(*) FROM providers").fetchone()[0] == 0:
-            base = os.environ.get("ART_PROVIDER_BASE_URL", "mock://local")
-            key = os.environ.get("ART_PROVIDER_API_KEY", "")
-            model = os.environ.get("ART_PROVIDER_MODEL", "mock-vision-xl")
-            conn.execute(
-                """INSERT INTO providers(name,base_url,api_key_enc,models_json,default_model,priority,is_default,active,supports_reference,created_at)
-                   VALUES(?,?,?,?,?,?,?,?,?,?)""",
-                ("Local Mock Provider", base, xor_crypt(key), json.dumps([{"id": model, "name": "Vision XL Mock", "enabled": True, "supports_reference": True}]), model, 1, 1, 1, 1, now_iso()),
-            )
 
 
 def create_session(kind, subject_id):
