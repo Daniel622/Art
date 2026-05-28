@@ -154,9 +154,32 @@ function modelPickerHtml(models, defaultModel=''){
   if(!list.length) return '<div class="model-empty">还没有模型。输入 Base URL 和 API Key 后点击“拉取模型”，或手动添加模型 ID。</div>';
   return `${modelToolbarHtml(list)}<div class="model-list">${list.map(m=>`<div class="model-item ${m.enabled?'is-enabled':'is-disabled'}" data-model-row data-model-id="${escapeHtml(m.id)}" data-model-name="${escapeHtml(m.name)}"><div class="model-main"><div class="model-title"><b>${escapeHtml(m.name)}</b><span>${escapeHtml(m.id)}</span></div><div class="model-badges">${m.enabled?'<span class="badge ok">已启用</span>':'<span class="badge muted">未启用</span>'}${defaultModel===m.id?'<span class="badge accent">默认调用</span>':''}${m.enabled?'<span class="badge warm">自动支持参考图</span>':''}</div></div><div class="model-controls"><label class="model-toggle"><input type="checkbox" data-model-enabled ${m.enabled?'checked':''}> 启用</label><label class="model-toggle"><input type="radio" name="default_model_choice" value="${escapeHtml(m.id)}" ${defaultModel===m.id?'checked':''} ${m.enabled?'':'disabled'}> 默认调用</label></div></div>`).join('')}</div>`;
 }
-function providerForm(p={active:true,is_default:false,supports_reference:true,priority:100,models:[],default_model:''}){
+function modelSummaryHtml(models, defaultModel=''){
+  const list = normalizeModels(models);
+  const enabled = list.filter(m=>m.enabled);
+  const defaultEntry = enabled.find(m=>m.id===defaultModel) || enabled[0];
+  return `<div class="model-summary"><div class="model-summary-main"><div class="model-toolbar"><span class="pill">共 ${list.length} 个模型</span><span class="pill">启用 ${enabled.length}</span>${defaultEntry?`<span class="pill">默认 ${escapeHtml(defaultEntry.name)}</span>`:''}</div><div class="small helper">模型已保存。需要调整时再展开编辑，新增 API 时可直接切换到空白表单。</div></div><div class="model-summary-actions"><button class="btn light" type="button" id="expandModels">展开模型</button></div></div>`;
+}
+function providerFormData(form){
+  const models = normalizeModels(JSON.parse($('[name=models]', form)?.value || '[]'));
+  return {
+    id: $('[name=id]', form)?.value || '',
+    name: $('[name=name]', form)?.value || '',
+    base_url: $('[name=base_url]', form)?.value || '',
+    api_key: $('[name=api_key]', form)?.value || '',
+    priority: $('[name=priority]', form)?.value || 100,
+    active: !!form.active?.checked,
+    is_default: !!form.is_default?.checked,
+    supports_reference: true,
+    models,
+    default_model: $('[name=default_model]', form)?.value || ''
+  };
+}
+function providerForm(p={active:true,is_default:false,supports_reference:true,priority:100,models:[],default_model:''}, opts={}){
   const models = normalizeModels(p.models||[]);
-  return `<form class="admin-provider-form" id="providerForm"><input type="hidden" name="id" value="${p.id||''}"><input type="hidden" name="models" value="${escapeHtml(JSON.stringify(models))}"><input type="hidden" name="default_model" value="${escapeHtml(p.default_model||'')}"><section class="panel provider-section"><h3>连接信息</h3><div class="admin-form provider-top"><div class="field"><label>Provider 名称</label><input name="name" value="${p.name||''}" required placeholder="例如 OpenAI Compatible"></div><div class="field"><label>API URL / Base URL</label><input name="base_url" value="${p.base_url||'mock://local'}" required placeholder="https://api.example.com/v1"></div><div class="field"><label>API Key</label><input name="api_key" value="${p.api_key||''}" placeholder="留空则保持原值"></div><div class="field"><label>优先级</label><input name="priority" type="number" value="${p.priority}"><div class="small helper">数字越小优先级越高。默认 Provider 会排在最前。</div></div></div></section><section class="panel provider-section"><h3>调用路由</h3><div class="provider-flags"><label><input name="active" type="checkbox" ${p.active?'checked':''}> 启用 Provider</label><label><input name="is_default" type="checkbox" ${p.is_default?'checked':''}> 默认 Provider</label></div><div class="small helper">Provider 默认支持参考图；如果某模型支持参考图，生成参考图任务时会优先选择对应能力的 Provider。</div></section><div class="provider-actions"><button class="btn light" type="button" id="fetchModels">拉取模型</button><button class="btn light" type="button" id="addModel">手动添加模型</button><button class="btn light" type="button" id="testProvider">测试</button><button class="btn primary" type="submit">保存 Provider</button></div><section class="panel provider-section"><div class="field model-field"><label>模型列表</label><div class="small helper">先勾选要启用的模型，再选择一个默认调用模型。未启用模型不能作为默认调用。</div><div class="model-picker" id="modelPicker">${modelPickerHtml(models,p.default_model||'')}</div></div></section></form>`
+  const expanded = opts.modelsExpanded ?? !p.id;
+  const summaryOrPicker = expanded ? modelPickerHtml(models,p.default_model||'') : (models.length ? modelSummaryHtml(models,p.default_model||'') : modelPickerHtml(models,p.default_model||''));
+  return `<form class="admin-provider-form" id="providerForm"><input type="hidden" name="id" value="${p.id||''}"><input type="hidden" name="models" value="${escapeHtml(JSON.stringify(models))}"><input type="hidden" name="default_model" value="${escapeHtml(p.default_model||'')}"><section class="panel provider-section"><h3>连接信息</h3><div class="admin-form provider-top"><div class="field"><label>Provider 名称</label><input name="name" value="${p.name||''}" required placeholder="例如 OpenAI Compatible"></div><div class="field"><label>API URL / Base URL</label><input name="base_url" value="${p.base_url||'mock://local'}" required placeholder="https://api.example.com/v1"></div><div class="field"><label>API Key</label><input name="api_key" value="${p.api_key||''}" placeholder="留空则保持原值"></div><div class="field"><label>优先级</label><input name="priority" type="number" value="${p.priority}"><div class="small helper">数字越小优先级越高。默认 Provider 会排在最前。</div></div></div></section><section class="panel provider-section"><h3>调用路由</h3><div class="provider-flags"><label><input name="active" type="checkbox" ${p.active?'checked':''}> 启用 Provider</label><label><input name="is_default" type="checkbox" ${p.is_default?'checked':''}> 默认 Provider</label></div><div class="small helper">Provider 默认支持参考图；如果某模型支持参考图，生成参考图任务时会优先选择对应能力的 Provider。</div></section><div class="provider-actions"><button class="btn light" type="button" id="fetchModels">拉取模型</button><button class="btn light" type="button" id="addModel">手动添加模型</button><button class="btn light" type="button" id="testProvider">测试</button>${p.id?'<button class="btn light" type="button" id="newProvider">新增 API</button>':''}<button class="btn primary" type="submit">保存 Provider</button></div><section class="panel provider-section"><div class="field model-field"><label>模型列表</label><div class="small helper">先勾选要启用的模型，再选择一个默认调用模型。未启用模型不能作为默认调用。</div><div class="model-picker" id="modelPicker">${summaryOrPicker}</div></div></section></form>`
 }
 function codeRow(c){return `<div class="row"><b>${escapeHtml(c.code)}</b><span>${escapeHtml(c.label||'')}</span><span>${c.used_quota}/${c.total_quota}</span><span>${c.active?'启用':'停用'}</span><span class="actions"><button class="btn light" data-edit-code="${c.id}">编辑</button><button class="btn light" data-del-code="${c.id}">删除</button></span></div>`}
 function providerRow(p){return `<div class="row provider" title="归档后会停用并从列表隐藏，历史生成记录仍保留"><b>${escapeHtml(p.name)}</b><span>${escapeHtml(p.base_url)}</span><span>${p.call_count}/${p.fail_count}</span><span>${p.active?'启用':'停用'}</span><span class="actions"><button class="btn light" data-edit-provider="${p.id}">编辑</button><button class="btn light danger" data-del-provider="${p.id}">删除/归档</button></span></div>`}
@@ -229,13 +252,29 @@ function bindAdmin(codes,providers){
   };
   $$('[data-edit-code]').forEach(b=>b.onclick=()=>{$('#codeForm').outerHTML=codeForm(codes.find(x=>x.id==b.dataset.editCode)); bindAdmin(codes,providers)});
   $$('[data-del-code]').forEach(b=>b.onclick=async()=>{if(confirm('删除该凭证？')){await del('/api/admin/codes/'+b.dataset.delCode);renderAdmin()}});
-  $$('[data-edit-provider]').forEach(b=>b.onclick=()=>{$('#providerForm').outerHTML=providerForm(providers.find(x=>x.id==b.dataset.editProvider)); bindAdmin(codes,providers)});
+  $$('[data-edit-provider]').forEach(b=>b.onclick=()=>{$('#providerForm').outerHTML=providerForm(providers.find(x=>x.id==b.dataset.editProvider), {modelsExpanded: true}); bindAdmin(codes,providers)});
   $$('[data-del-provider]').forEach(b=>b.onclick=async()=>{
     if(confirm('归档该 Provider？归档后会停用并从列表隐藏，历史记录仍保留。')){
       await del('/api/admin/providers/'+b.dataset.delProvider);
       renderAdmin();
     }
   });
+  const expandBtn = $('#expandModels');
+  if (expandBtn) {
+    expandBtn.onclick = () => {
+      const form = $('#providerForm');
+      const p = providerFormData(form);
+      form.outerHTML = providerForm(p, {modelsExpanded: true});
+      bindAdmin(codes, providers);
+    };
+  }
+  const newBtn = $('#newProvider');
+  if (newBtn) {
+    newBtn.onclick = () => {
+      $('#providerForm').outerHTML = providerForm({}, {modelsExpanded: false});
+      bindAdmin(codes, providers);
+    };
+  }
   $('#testProvider').onclick=async()=>{
     const f=Object.fromEntries(new FormData($('#providerForm')));
     const r=await post('/api/admin/providers/test',f).catch(e=>({message:e.message}));
